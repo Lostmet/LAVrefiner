@@ -1,7 +1,7 @@
 
-# SVrefiner
+# SVrefiner (or LAVrefiner)
 
-**SVrefiner** is a Python-based tool for processing structural variants (SVs) and generating refined SVs (rSVs) in VCF v4.2 format.
+**SVrefiner** is a Python-based tool for processing structural variants (SVs) and indels (Length-altering variants, LAVs) and generating refined SVs (rLAVs, or rLAVs) in VCF v4.2 format.
 It integrates sequence alignment, window scanning, and merging workflows to resolve overlapping SVs, with a focus on `DEL` (deletions) and `INS` (insertions).
 Complex SVs (ref* and alt* differ at the first base, or both ref and alt are longer than 1 bp) are not processed in the current version to improve efficiency, as their occurrence in real datasets is relatively small (e.g., only **2.2%** in the tomato pangenome; Zhou *et al.*, *Nature*, 2022, 606: 527–534).
 > ref: reference allele, alt: alternative allele
@@ -45,7 +45,7 @@ Or you can download MAFFT directly from the [official MAFFT website](https://maf
 | ----------------------- | --------------------------------------------- |
 | `alignment_results/`    | Alignment results for each overlapping group  |
 | `matrix_results/`       | Output matrices for each overlapping group    |
-| `rSV.vcf`               | Refined SVs (final VCF)                       |
+| `rLAV.vcf`               | Refined LAVs (final VCF)                       |
 | `*.log`                 | Execution logs                                |
 
 ---
@@ -61,7 +61,7 @@ Or you can download MAFFT directly from the [official MAFFT website](https://maf
   - If your VCF is not normalized, please preprocess it using external tools (e.g., `bcftools norm`) before running SVrefiner.
   
 - It is recommended to perform quality control (QC) on the SVs prior to running SVrefiner.
-  - Low-quality SVs, especially those with high missingness (low call rate), can significantly compromise the quality of the resulting rSVs, please consider filtering such variants before proceeding.
+  - Low-quality SVs, especially those with high missingness (low call rate), can significantly compromise the quality of the resulting rLAVs, please consider filtering such variants before proceeding.
 
 
 ---
@@ -87,7 +87,7 @@ Or you can download MAFFT directly from the [official MAFFT website](https://maf
 | ------------- | ----------------------------------------------------------------------- |
 | `process-vcf` | Process VCF to identify overlapping SVs; output `nSV.vcf` and `oSV.vcf` |
 | `align`       | Perform sequence alignment for overlapping SVs                          |
-| `make-rsv`    | Define refined SVs from aligned sequences and output `rSV.vcf`          |
+| `make-rLAV`    | Define refined SVs from aligned sequences and output `rLAV.vcf`          |
 | `run-all`     | Execute the complete pipeline                                           |
 
 ## Options
@@ -116,10 +116,10 @@ This separates overlapping (`oSV.vcf`) and non-overlapping (`nSV.vcf`) SVs.
 SVrefiner align --vcf test.vcf.gz --ref test.fasta --out test --threads 10
 ```
 
-#### Step 3: Define rSV
+#### Step 3: Define rLAV
 
 ```bash
-SVrefiner make-rsv --vcf test.vcf.gz --ref test.fasta --out test --threads 10
+SVrefiner make-rLAV --vcf test.vcf.gz --ref test.fasta --out test --threads 10
 ```
 
 #### Complete Pipeline
@@ -146,14 +146,14 @@ SVrefiner run-all --vcf test.vcf.gz --ref test.fasta --out test --threads 10
 
 ## Conceptual Overview
 
-The pipeline resolves overlapping SVs into more precise rSVs through alignment and window-based clustering (Figure 1).
+The pipeline resolves overlapping SVs into more precise rLAVs through alignment and window-based clustering (Figure 1).
 
 <p align="center">
 <img src="https://github.com/user-attachments/assets/69c43992-af28-4669-a35e-198771986241" width="800">
 </p>
 <p align="center"><b>Figure 1.</b> Schematic of SVrefiner workflow and outputs.</p>
 
-For detailed algorithmic description, see: [Algorithmic Logic of rSV Software](https://github.com/Lostmet/Algorithmic_Logic_of_rSV_Software).
+For detailed algorithmic description, see: [Algorithmic Logic of rLAV Software](https://github.com/Lostmet/Algorithmic_Logic_of_rLAV_Software).
 
 ---
 
@@ -163,8 +163,8 @@ For detailed algorithmic description, see: [Algorithmic Logic of rSV Software](h
 
 | File/Directory | Description         |
 | -------------- | ------------------- |
-| `rSV.vcf`      | Final refined SVs   |
-| `rSV_meta.csv` | rSV metadata        |
+| `rLAV.vcf`      | Final refined SVs   |
+| `rLAV_meta.csv` | rLAV metadata        |
 | `nSV.vcf`      | Non-overlapping SVs |
 | `oSV.vcf`      | Overlapping SVs     |
 | `*.log`        | Runtime logs        |
@@ -187,7 +187,7 @@ Excluded SNP count:           0
 Overlapping SVs:              28
 Overlapping SVs percentage:   28.00%
 Total variant groups:         9
-Final rSV count:              45
+Final rLAV count:              45
 ```
 
 ### `alignment_results/`
@@ -203,9 +203,9 @@ Final rSV count:              45
 
 | File                 | Description                         |
 | -------------------- | ----------------------------------- |
-| `Group_D_matrix.csv` | D matrix (rSV–SV relationships)     |
+| `Group_D_matrix.csv` | D matrix (rLAV–SV relationships)     |
 | `Group_X_matrix.csv` | X matrix (SV–sample relationships)  |
-| `Group_T_matrix.csv` | T matrix (rSV–sample relationships) |
+| `Group_T_matrix.csv` | T matrix (rLAV–sample relationships) |
 
 ### `alignment_error_logs/`
 
