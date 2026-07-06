@@ -3,7 +3,7 @@
 **LAVrefiner** is a Python-based tool for processing structural variants (SVs) and indels (Length-altering variants, LAVs) and generating refined LAVs (rLAVs) in VCF v4.2 format.
 It integrates sequence alignment, window scanning, and merging workflows to resolve overlapping LAVs, with a focus on `DEL` (deletions) and `INS` (insertions). It also supports Tandem Repeat (TR) aware alignments, Quality Control (QC), and TR motif dosage calculations.
 
-Complex LAVs (i.e., where ref and alt differ at the first base, or both ref and alt are longer than 1 bp) are not processed in the current version to improve efficiency, as their occurrence in real datasets is relatively small (e.g., only **2.2%** in the tomato pangenome; Zhou *et al.*, *Nature*, 2022, 606: 527–534).
+Complex LAVs (i.e., where ref and alt differ at the first base, or both ref and alt are longer than 1 bp) are not processed in the current version to improve efficiency.
 
 > ref: reference allele, alt: alternative allele
 
@@ -173,10 +173,10 @@ lavrefiner QC --vcf test_out/rLAV.vcf --out test_out --prefix filtered_rLAV --tr
 
 #### Step 5: Dosage Calculation
 
-Calculate TR motif dosages and copy numbers directly for downstream applications like GWAS or eQTLs.
+Calculate TR motif dosages and copy numbers directly for downstream applications like GWAS or eQTLs. The inputed VCF should incorporate all indels and SVs (LAVs) within TR regions.
 
 ```bash
-lavrefiner dosage --vcf test_out/rLAV.vcf --tr-vcf TRCompDB.vcf.gz --out test_out --prefix TR_dosage --threads 10
+lavrefiner dosage --vcf test_out/LAV.vcf.gz --tr-vcf TRCompDB.vcf.gz --out test_out --prefix TR_dosage --threads 10
 
 ```
 
@@ -184,7 +184,7 @@ lavrefiner dosage --vcf test_out/rLAV.vcf --tr-vcf TRCompDB.vcf.gz --out test_ou
 
 ## Requirements
 
-* **Python ≥ 3.8** (Python 3.12 recommended)
+* **Python ≥ 3.8**
 * **MAFFT ≥ v7.526**
 * Python libraries:
 * `pandas`
@@ -193,6 +193,7 @@ lavrefiner dosage --vcf test_out/rLAV.vcf --tr-vcf TRCompDB.vcf.gz --out test_ou
 * `pysam`
 * `click`
 * `tqdm`
+* `Levenshtein`
 
 
 
