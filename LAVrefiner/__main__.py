@@ -1,4 +1,4 @@
-from SVrefiner.cli import cli
+from LAVrefiner.cli import cli
 
 if __name__ == "__main__":
     cli()

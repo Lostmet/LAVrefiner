@@ -116,9 +116,9 @@ def load_encoded_gt_from_matrix_dir(out_dir: str):
                     continue  # Other files drop first row
                 gt_buffer.append(encode_line(line))
     
-    rSV_count = len(gt_buffer)
+    rLAV_count = len(gt_buffer)
 
-    return rSV_count, sample_names, gt_buffer
+    return rLAV_count, sample_names, gt_buffer
 
 
 def vcf_generate_from_gt(meta_csv_file: str, output_vcf_file: str, sample_names: list, gt_buffer: list):
@@ -135,17 +135,38 @@ def vcf_generate_from_gt(meta_csv_file: str, output_vcf_file: str, sample_names:
                 pos = meta_data.get("pos")
                 ref = meta_data.get("ref")
                 alt = meta_data.get("alt")
-                vcf_data.append([chrom, pos, group_name, ref, alt, ".", ".", "TYPE=rSV", "GT"])
+                
+                info_list = ["TYPE=rLAV"]
+                if "TR_DIV" in meta_data:
+                    score = meta_data["TR_DIV"]
+                    info_list.append(f"TR_DIV={float(score):.4f}")
+                if "TR_TYPE" in meta_data:
+                    info_list.append(f"TR_TYPE={meta_data['TR_TYPE']}")
+                if "RL" in meta_data:
+                    info_list.append(f"RL={meta_data['RL']}")
+                
+                info_str = ";".join(info_list)
+
+                vcf_data.append([chrom, pos, group_name, ref, alt, ".", ".", info_str, "GT"])
             except Exception as e:
                 logger.error(f"Error at row {index}: {e}")
                 continue
 
     with open(output_vcf_file, "w", newline='') as f_out:
         f_out.write("##fileformat=VCFv4.2\n")
-        f_out.write('##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">\n')
-
+        
+        cmd_str = " ".join(sys.argv)
+        date_str = time.ctime()
+        fout.write(f'##LAVrefiner_Command={cmd_str}; Date={date_str}\n')
+        
+        fout.write('##INFO=<ID=TYPE,Number=1,Type=String,Description="Variant Type">\n')
+        fout.write('##INFO=<ID=TR_DIV,Number=1,Type=Float,Description="Motif divergence for TR variants (0=perfect, higher=more divergent)">\n')
+        fout.write('##INFO=<ID=TR_TYPE,Number=1,Type=String,Description="Tandem Repeat Type: STR (<=6bp) or VNTR (>6bp)">\n')
+        fout.write('##INFO=<ID=RL,Number=1,Type=Integer,Description="Repeat Unit Length">\n')
+        fout.write('##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">\n')
+        
         header_cols = ["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT"]
-        f_out.write("\t".join(header_cols + sample_names) + "\n")
+        fout.write("\t".join(header_cols + sample_names) + "\n")
 
         for idx, row in enumerate(vcf_data):
             gt_line = gt_buffer[idx]
@@ -154,7 +175,7 @@ def vcf_generate_from_gt(meta_csv_file: str, output_vcf_file: str, sample_names:
     logger.info(f"{output_vcf_file} made successfully.")
 
 
-def build_rsv_vcf(vcf_dir: str,
+def build_rlav_vcf(vcf_dir: str,
                   output_dir: str,
                   meta_csv_file: str,
                   output_vcf_file: str,
@@ -165,16 +186,14 @@ def build_rsv_vcf(vcf_dir: str,
     if writedown:
         # Keep the old path: write X → write T → read T → VCF
         compute_t_matrix(output_dir)
-        # Here reuse your original loading function (if your function path is rooted at output_dir
-        # instead of matrix_results, please adjust accordingly)
-        rSV_count, sample_names2, gt_buffer2 = load_encoded_gt_from_matrix_dir(output_dir)
+        rLAV_count, sample_names2, gt_buffer2 = load_encoded_gt_from_matrix_dir(output_dir)
         assert sample_names2 == sample_names
         vcf_generate_from_gt(meta_csv_file, output_vcf_file, sample_names, gt_buffer2)
     else:
         # New path: directly generate VCF using in-memory GT buffer
         vcf_generate_from_gt(meta_csv_file, output_vcf_file, sample_names, gt_buffer)
 
-    logger.info(f"Done. rSV VCF at: {output_vcf_file}")
+    logger.info(f"Done. rLAV VCF at: {output_vcf_file}")
 
 
 # =========================
@@ -184,8 +203,6 @@ def build_rsv_vcf(vcf_dir: str,
 def _dfile_sort_key_true_style(fname: str) -> Tuple[int, int, int, str]:
     """
     Sort D matrix files by (chrom, group_number, pos, fname).
-    File names are like: Group_{chrom}_{group_number}_{pos}_D_matrix.csv
-    This matches the sorting of save_meta_csv (chrom, group_number, meta.pos).
     """
     m = re.match(r'Group_(\d+)_(\d+)_(\d+)_D_matrix\.csv', fname)
     if not m:
@@ -197,10 +214,6 @@ def _dfile_sort_key_true_style(fname: str) -> Tuple[int, int, int, str]:
 def _parse_chrom_group_from_group_name(gname: str) -> Optional[Tuple[int, int]]:
     """
     Extract (chrom, group_number) from group_name.
-    Examples:
-      'Group_1_42' -> (1, 42)
-      '1_42'       -> (1, 42)
-    If fewer than two integers are found, return None.
     """
     nums = re.findall(r'\d+', gname)
     if len(nums) < 2:
@@ -211,9 +224,6 @@ def _parse_chrom_group_from_group_name(gname: str) -> Optional[Tuple[int, int]]:
 def _norm_contig(chrom_token: str, contig_names: List[str]) -> str:
     """
     Normalize chromosome IDs in D files to match VCF header naming.
-    - If VCF uses '1,2,3': return the token as is (e.g., '1')
-    - If VCF uses 'chr1,chr2': attempt to add 'chr' prefix for matching
-    You can also extend this mapping for X/Y/MT if needed.
     """
     if chrom_token in contig_names:
         return chrom_token
@@ -230,7 +240,6 @@ def _norm_contig(chrom_token: str, contig_names: List[str]) -> str:
 def _make_vcf_iter(vcf_path: str):
     """
     Open an unindexed VCF, return (vcf_in, iterator, contig_order).
-    Only a single sequential scan is performed, no tabix random access.
     """
     vcf_in = pysam.VariantFile(vcf_path, "r")
     contigs = list(vcf_in.header.contigs.keys())
@@ -244,10 +253,7 @@ def _advance_to(v_iter,
                 target_pos: int,
                 contig_order: dict):
     """
-    Advance current to the first record at (target_contig, target_pos):
-      - If current.contig is before the target, keep advancing;
-      - Once at the target contig, advance to pos >= target_pos;
-      - Return (current, found), where found indicates if current exactly matches target_pos.
+    Advance current to the first record at (target_contig, target_pos).
     """
     if current is None:
         return None, False
@@ -274,9 +280,7 @@ def _read_group_gt_sequential(v_iter,
                               contig_order: dict) -> Tuple[np.ndarray, object]:
     """
     In sequential scan mode, advance from current to (contig, start_pos),
-    read n_rows consecutive records, and convert into an (n_rows, n_samples) int16 matrix.
-    Values: 0/1/2 (genotype encoding) or -999 (missing/invalid).
-    Return (gt_raw, next_current).
+    read n_rows consecutive records.
     """
     current, ok = _advance_to(v_iter, current, contig, start_pos, contig_order)
     if not ok:
@@ -310,10 +314,10 @@ def _read_group_gt_sequential(v_iter,
 
 
 # =========================
-# 🔥 Main function: streamed, no large buffer, block-wise rSV.vcf writing
+# Main function: streamed, no large buffer, block-wise rLAV.vcf writing
 # =========================
 
-def build_rsv_vcf_streamed_nobuf(vcf_dir: str,
+def build_rlav_vcf_streamed_nobuf(vcf_dir: str,
                                  output_dir: str,
                                  meta_csv_file: str,
                                  output_vcf_file: str,
@@ -321,17 +325,12 @@ def build_rsv_vcf_streamed_nobuf(vcf_dir: str,
                                  SAMPLE_CHUNK: int = 4096) -> Tuple[int, List[str]]:
     """
     Fully streamed: no X/T writing, no df_vcf, no gt_buffer.
-    Strictly follow (chrom, group_number, pos) order of D files,
-    aligned with save_meta_csv ordering.
-    For each rSV: select original rows by the D column, sum along the sample dimension (in blocks),
-    and write to VCF on the fly.
-
-    Returns: (rSV_count, sample_names)
+    Aligned with save_meta_csv ordering.
     """
     output_dir = os.path.abspath(output_dir)
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
-    # 1) D file order (consistent with save_meta_csv)
+    # 1) D file order
     d_files = sorted(
         [f for f in os.listdir(output_dir) if re.match(r'Group_(\d+)_(\d+)_(\d+)_D_matrix\.csv', f)],
         key=_dfile_sort_key_true_style
@@ -340,7 +339,7 @@ def build_rsv_vcf_streamed_nobuf(vcf_dir: str,
         raise RuntimeError("No D_matrix CSV files found in output_dir.")
 
     # 2) VCF sequential scan (no tabix)
-    vcf_path = os.path.join(vcf_dir, "oSV.vcf")
+    vcf_path = os.path.join(vcf_dir, "oLAV.vcf")
     vcf_in, v_iter, contig_order = _make_vcf_iter(vcf_path)
     contig_names = list(vcf_in.header.contigs.keys())
     sample_names = list(vcf_in.header.samples)
@@ -350,16 +349,47 @@ def build_rsv_vcf_streamed_nobuf(vcf_dir: str,
     with open(meta_csv_file, newline="") as fmeta, open(output_vcf_file, "w") as fout:
         meta_reader = csv.DictReader(fmeta)
 
-        # VCF Header
+        # === Write VCF Header ===
         fout.write("##fileformat=VCFv4.2\n")
+        
+        # 3.1 Contigs: Smart copy from input VCF OR scan from files
+        input_contigs = list(vcf_in.header.contigs.values())
+        
+        if input_contigs:
+            for contig in input_contigs:
+                c_id = contig.name
+                c_id_out = c_id[3:] if c_id.startswith("chr") else c_id
+                line_parts = [f"ID={c_id_out}"]
+                if hasattr(contig, 'length') and contig.length is not None and contig.length > 0:
+                     line_parts.append(f"length={contig.length}")
+                fout.write(f"##contig=<{','.join(line_parts)}>\n")
+        else:
+            seen_chroms = set()
+            for dname in d_files:
+                m = re.match(r'Group_(\d+)_', dname)
+                if m:
+                    seen_chroms.add(int(m.group(1)))
+            for c in sorted(list(seen_chroms)):
+                fout.write(f"##contig=<ID={c}>\n")
+
+        # 3.2 Custom Headers
+        cmd_str = " ".join(sys.argv)
+        date_str = time.ctime()
+        fout.write(f'##LAVrefiner_Command={cmd_str}; Date={date_str}\n')
+        
+        fout.write('##INFO=<ID=TYPE,Number=1,Type=String,Description="Variant Type">\n')
+        fout.write('##INFO=<ID=TR_DIV,Number=1,Type=Float,Description="Motif divergence for TR variants (0=perfect, higher=more divergent)">\n')
+        fout.write('##INFO=<ID=TR_TYPE,Number=1,Type=String,Description="Tandem Repeat Type: STR (<=6bp) or VNTR (>6bp)">\n')
+        fout.write('##INFO=<ID=RL,Number=1,Type=Integer,Description="Repeat Unit Length">\n')
         fout.write('##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">\n')
+        
         header_cols = ["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO", "FORMAT"]
         fout.write("\t".join(header_cols + sample_names) + "\n")
 
-        rsv_total = 0
+        rlav_total = 0
         current = next(v_iter, None)
 
-        with tqdm(total=len(d_files), desc="Genotyping rSV (streamed, no-buf)", unit="group", mininterval=0.2) as pbar:
+        with tqdm(total=len(d_files), desc="Genotyping rLAV (streamed, no-buf)", unit="group", mininterval=0.2) as pbar:
             for dname in d_files:
                 m = re.match(r'Group_(\d+)_(\d+)_(\d+)_D_matrix\.csv', dname)
                 if not m:
@@ -370,30 +400,28 @@ def build_rsv_vcf_streamed_nobuf(vcf_dir: str,
                 group_number = int(group_s)
                 start_pos = int(pos_s)
 
-                contig = _norm_contig(str(chrom), contig_names)
+                contig_read = _norm_contig(str(chrom), contig_names)
+                contig_write = contig_read[3:] if contig_read.startswith("chr") else contig_read
 
-                # Read D matrix; first column is block key, following are rSV columns
                 df_full = pd.read_csv(os.path.join(output_dir, dname))
-                d_mat = df_full.iloc[:, 1:].to_numpy(dtype=np.int8, copy=False)  # small integers save memory
-                n_rows, m_rsv = d_mat.shape
+                d_mat = df_full.iloc[:, 1:].to_numpy(dtype=np.int8, copy=False)
+                n_rows, m_rlav = d_mat.shape
 
-                # Sequentially read n_rows lines from VCF at the correct position
                 gt_raw, current = _read_group_gt_sequential(
                     v_iter=v_iter,
                     current=current,
-                    contig=contig,
+                    contig=contig_read,
                     start_pos=start_pos,
                     n_rows=n_rows,
                     sample_names=sample_names,
                     contig_order=contig_order
-                )  # (n_rows, n_samples) int16
+                )
 
-                # Write each rSV without constructing full t_mat (m_rsv × n_samples)
-                for k in range(m_rsv):
+                for k in range(m_rlav):
                     try:
                         row = next(meta_reader)
                     except StopIteration:
-                        raise RuntimeError("Insufficient meta_csv rows; cannot align with D by group and rSV.")
+                        raise RuntimeError("Insufficient meta_csv rows; cannot align with D by group and rLAV.")
 
                     if strict_meta_group_check:
                         got_gname = row.get("group_name", "")
@@ -406,8 +434,6 @@ def build_rsv_vcf_streamed_nobuf(vcf_dir: str,
                                 "Meta group_name mismatch.\n"
                                 f"  D: chrom={chrom}, group={group_number}, start_pos={start_pos}\n"
                                 f"  meta group_name={got_gname}\n"
-                                "Please ensure meta and D are strictly consistent in (chrom, group_number) "
-                                "(pos should be sorted within meta)."
                             )
 
                     meta = ast.literal_eval(row["meta_array"])
@@ -415,25 +441,30 @@ def build_rsv_vcf_streamed_nobuf(vcf_dir: str,
                     ref = str(meta.get("ref"))
                     alt = str(meta.get("alt"))
                     group_name = row["group_name"]
-                    info = "TYPE=rSV"
+                    
+                    info_list = ["TYPE=rLAV"]
+                    if "TR_DIV" in meta:
+                        score = meta["TR_DIV"]
+                        info_list.append(f"TR_DIV={float(score):.4f}")
+                    if "TR_TYPE" in meta:
+                        info_list.append(f"TR_TYPE={meta['TR_TYPE']}")
+                    if "RL" in meta:
+                        info_list.append(f"RL={meta['RL']}")
+                    
+                    info = ";".join(info_list)
 
-                    # Original rows participating in this rSV (usually sparse)
                     rows_idx = np.flatnonzero(d_mat[:, k])
 
-                    # Write the fixed 9 columns
-                    fout.write("\t".join([contig, str(pos), group_name, ref, alt, ".", ".", info, "GT"]))
+                    fout.write("\t".join([contig_write, str(pos), group_name, ref, alt, ".", ".", info, "GT"]))
 
                     if rows_idx.size == 0:
-                        # No contributing rows: all 0/0 (equivalent to empty sum)
                         fout.write("\t" + "\t".join(("0/0",) * n_samples) + "\n")
-                        rsv_total += 1
+                        rlav_total += 1
                         continue
 
-                    # Process samples in chunks to avoid building oversized strings
                     j0 = 0
                     while j0 < n_samples:
                         j1 = min(j0 + SAMPLE_CHUNK, n_samples)
-                        # Sum genotypes: treat -999 as invalid (not 0/1/2), encode as missing later
                         s = gt_raw[rows_idx, j0:j1].astype(np.int32, copy=False).sum(axis=0)
 
                         enc_chunk = []
@@ -450,9 +481,9 @@ def build_rsv_vcf_streamed_nobuf(vcf_dir: str,
                         j0 = j1
 
                     fout.write("\n")
-                    rsv_total += 1
+                    rlav_total += 1
 
                 pbar.update(1)
 
-    logger.info(f"rSV.vcf written: {output_vcf_file}")
-    return rsv_total, sample_names
+    logger.info(f"rLAV.vcf written: {output_vcf_file}")
+    return rlav_total, sample_names

@@ -33,6 +33,7 @@ def _dfile_sort_key_true_style(fname: str):
     """
     parts = fname.split('_')
     try:
+        # Group_{chrom}_{group_num}_{pos}_D_matrix.csv
         return (int(parts[1]), int(parts[2]))
     except Exception:
         return (1 << 60, 1 << 60)
@@ -72,16 +73,18 @@ def process_vcf_to_x_matrix(vcf_dir: str, output_dir: str, writedown: bool = Fal
     output_dir = os.path.abspath(output_dir)
     os.makedirs(output_dir, exist_ok=True)
     csv_files = [f for f in os.listdir(output_dir) if re.match(r'Group_\d+_\d+_\d+_D_matrix\.csv', f)]
-    # Consistent with True style sorting (ensure _dfile_sort_key_true_style is defined)
+    # Consistent with True style sorting
     csv_files = sorted(csv_files, key=_dfile_sort_key_true_style)
 
     df_vcf["#CHROM"] = df_vcf["#CHROM"].astype(str)
 
     gt_buffer = [] if not writedown else None
 
-    # === Process groups (aligned to D, one group at a time) ===
+    # === Process groups using a sequential cursor ===
     total_groups = len(csv_files)
-    with tqdm(total=total_groups, desc="Genotyping rSV", unit="group", mininterval=0.2) as pbar_groups:
+    current_vcf_idx = 0
+    
+    with tqdm(total=total_groups, desc="Genotyping rLAV", unit="group", mininterval=0.2) as pbar_groups:
         for csv_file in csv_files:
             m = re.match(r'Group_(\d+)_(\d+)_(\d+)_D_matrix\.csv', csv_file)
             if not m:
@@ -90,23 +93,28 @@ def process_vcf_to_x_matrix(vcf_dir: str, output_dir: str, writedown: bool = Fal
             chrom, number, pos = m.groups()
             chrom, pos = str(chrom), int(pos)
 
-            vcf_row_index = df_vcf[(df_vcf["#CHROM"] == chrom) & (df_vcf["POS"] == pos)].index
-            if vcf_row_index.empty:
-                logger.warning(f"Warning: #CHROM {chrom}, POS {pos} not found in VCF for {csv_file}")
-                pbar_groups.update(1)
-                continue
-
-            start_idx = vcf_row_index[0]
             d_path = os.path.join(output_dir, csv_file)
-            df_d_full = pd.read_csv(d_path)  # first column: block key; subsequent columns: rSV IDs
+            df_d_full = pd.read_csv(d_path)  # first column: block key; subsequent columns: rLAV IDs
             num_rows_to_extract = len(df_d_full)
 
-            vcf_subset = df_vcf.iloc[start_idx: start_idx + num_rows_to_extract].reset_index(drop=True)
+            if current_vcf_idx < len(df_vcf):
+                vcf_pos = df_vcf.at[current_vcf_idx, "POS"]
+                if vcf_pos != pos:
+                    logger.warning(
+                        f"POS Mismatch warning in {csv_file}: "
+                        f"Expected {pos}, Found VCF row {current_vcf_idx} with POS {vcf_pos}. "
+                        "This may indicate oSV.vcf is not perfectly aligned with D matrices."
+                    )
+
+            vcf_subset = df_vcf.iloc[current_vcf_idx: current_vcf_idx + num_rows_to_extract].reset_index(drop=True)
+            
+            current_vcf_idx += num_rows_to_extract
+
             gt_matrix = vcf_subset[sample_names]
             gt_np = gt_matrix.to_numpy(dtype=np.int64, copy=False)
 
             if writedown:
-                # Old logic: write X to disk (unchanged)
+                # Old logic: write X to disk
                 output_file = os.path.join(output_dir, csv_file.replace("_D_matrix.csv", "_X_matrix.csv"))
                 header_row = [f"{chrom}_{pos}"] + sample_names
                 first_col = df_d_full.iloc[:, 0].astype(str).tolist()
@@ -118,7 +126,7 @@ def process_vcf_to_x_matrix(vcf_dir: str, output_dir: str, writedown: bool = Fal
                         row.extend(gt_np[r, :].tolist())
                         w.writerow(row)
             else:
-                # New logic: do not write to disk, directly compute T and encode → append to gt_buffer
+                # New logic: compute T in memory
                 d_data = df_d_full.iloc[:, 1:].to_numpy(dtype=np.int64, copy=False)  # (rows, m)
                 t_mat  = d_data.T.dot(gt_np)                                        # (m, n_samples)
 

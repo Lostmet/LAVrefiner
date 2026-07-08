@@ -18,10 +18,12 @@ def get_max_insertions(variants: List[Variant], start: int) -> Tuple[Dict[int, i
 
     for variant in variants:
         rel_start = variant.start - start
+        # Check if it looks like an insertion (Ref=1, Alt>1)
         if len(variant.ref) == 1 and len(variant.alt[0]) > 1:
             max_insertions[rel_start] = max(max_insertions.get(rel_start, 0), len(variant.alt[0]))
             pos_set.append(variant.start)
 
+    # Strict check: Only True if there are MULTIPLE insertions at the SAME position (overlapping/multiallelic)
     if len(pos_set) != len(set(pos_set)):
         has_insertion = True
 
@@ -50,6 +52,7 @@ def adjust_variants_for_insertions(
     poly_ins = {}
 
     if len(variant.ref) > 1 and len(variant.alt[0]) == 1:
+        # DELETION
         ref_list[rel_start:rel_end - 1] = list((len(variant.ref) - 1) * "-")
         for pos, max_ins_length in sorted(max_insertions.items()):
             blanks = list("-" * (max_ins_length - 1))
@@ -58,15 +61,20 @@ def adjust_variants_for_insertions(
             ins += max_ins_length - 1
 
     elif len(variant.ref) == 1 and len(variant.alt[0]) > 1:
+        # INSERTION
         for pos, max_ins_length in sorted(max_insertions.items()):
             if rel_start != pos:
+                # Not current insertion pos, add padding
                 blanks = list("-" * (max_ins_length - 1))
                 for i, char in enumerate(blanks):
                     ref_list.insert(pos + ins + i, char)
                 ins += max_ins_length - 1
             else:
+                # Current insertion pos
                 alt = list(variant.alt[0][1:])
+                # Calculate needed blanks (0 if this is the longest insertion)
                 blanks = list("-" * (max_ins_length - len(variant.alt[0])))
+                
                 position = 0
                 for char in alt:
                     ref_list.insert(pos + ins + position, char)
@@ -74,13 +82,15 @@ def adjust_variants_for_insertions(
                 for char in blanks:
                     ref_list.insert(pos + ins + position, char)
                     position += 1
-                if blanks:
-                    poly_ins["start"] = pos + ins
-                    poly_ins["end"] = pos + ins + position
-                    poly_ins["pos"] = start + 1
+                
+                poly_ins["start"] = pos + ins
+                poly_ins["end"] = pos + ins + position
+                poly_ins["pos"] = start + 1
+                
                 ins += max_ins_length - 1
 
     else:
+        # COMPLEX / SNP
         ref_list[rel_start:rel_end - 1] = list(variant.alt)
         for pos, max_ins_length in sorted(max_insertions.items()):
             blanks = list("-" * (max_ins_length - 1))
@@ -126,7 +136,6 @@ def generate_fasta_sequences(
                     for i, group in enumerate(groups, 1):
                         futures.append(executor.submit(process_group, chrom, i, group))
 
-                seen = set()
                 group_bp_all = 0
                 for future in concurrent.futures.as_completed(futures):
                     chrom, i, group, group_name, ref_seq_adjusted, variant_results, has_insertion, group_bp = future.result()
@@ -134,13 +143,17 @@ def generate_fasta_sequences(
 
                     has_insertion_dict[group_name] = has_insertion
                     fasta_out.write(f">{group_name}\n{ref_seq_adjusted}\n")
+                    
+                    seen_in_group = set()
+                    
                     for var_id, var_seq, poly_ins in variant_results:
                         fasta_out.write(f">{var_id}\n{var_seq}\n")
-                        if poly_ins:
+                        
+                        if has_insertion and poly_ins:
                             dict_frozenset = frozenset(poly_ins.items())
-                            if dict_frozenset not in seen:
+                            if dict_frozenset not in seen_in_group:
                                 poly_ins_list.append(poly_ins)
-                                seen.add(dict_frozenset)
+                                seen_in_group.add(dict_frozenset)
 
                     pbar.update(1)
 

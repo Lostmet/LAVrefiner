@@ -25,15 +25,25 @@ class VariantGroup:
         self.variants = []
         self.start = float('inf')
         self.end = 0
-        
+        self.m_start = float('inf') 
+        self.m_end = 0       
+         
     def add_variant(self, variant: Variant):
         self.variants.append(variant)
         self.start = min(self.start, variant.start)
         self.end = max(self.end, variant.end)
+        v_m_start = variant.start if variant.start == variant.end else variant.start + 1
+        v_m_end = variant.end
         
+        self.m_start = min(self.m_start, v_m_start)
+        self.m_end = max(self.m_end, v_m_end)  
+              
     def overlaps(self, variant: Variant) -> bool:
-        return (variant.start <= self.end and 
-                variant.end >= self.start)
+        v_m_start = variant.start if variant.start == variant.end else variant.start + 1
+        v_m_end = variant.end
+        
+        return (v_m_start <= self.m_end and 
+                v_m_end >= self.m_start)
 
 
 def parse_chrom(chrom: str) -> int:
@@ -92,10 +102,8 @@ def process_variants(config) -> List[VariantGroup]:
 
                 elif list(record.alts) == ['<DEL>']:
                     with pysam.FastaFile(config.ref_fasta) as fa:
-                        # REF: POS 到 END 的序列
                         ref_seq = fa.fetch(record.chrom, record.pos - 1, record.stop).upper()
 
-                        # ALT: POS 上的碱基
                         alt_base = fa.fetch(record.chrom, record.pos - 1, record.pos).upper()
 
                     variant = Variant(
@@ -174,7 +182,7 @@ def process_variants(config) -> List[VariantGroup]:
                         if var_not_align_count == 0:
                             var_not_align_list.append(f'chrom:{chrom}, pos:{pos}')
                             logger.warning(f"Warning: Unaligned variant detected, chrom: {chrom}, pos: {pos}. \
-                                           \nPlease check; the software will save these variants into nSV.vcf")
+                                           \nPlease check; the software will save these variants into nLAV.vcf")
                         else:
                             var_not_align_list.append(f'chrom:{chrom}, pos:{pos}')
 
@@ -264,7 +272,7 @@ def process_variants(config) -> List[VariantGroup]:
             inv_current_group.add_variant(inv)
             inv_groups.append(inv_current_group)
 
-        logger.info(f"Excluding {inv_count} inversion(s)")
+        logger.info(f"Detecting {inv_count} inversion(s)")
 
     # Process snp_group
     if snp_group:
@@ -273,7 +281,7 @@ def process_variants(config) -> List[VariantGroup]:
             snp_current_group.add_variant(snp)
             snp_groups.append(snp_current_group)
 
-        logger.warning(f"Excluding {snp_count} SNP(s)") 
+        logger.warning(f"Detecting {snp_count} SNP(s)") 
 
     # Process var_not_aligned_group
     if var_not_aligned_group:
@@ -282,7 +290,7 @@ def process_variants(config) -> List[VariantGroup]:
             var_current_group.add_variant(var)
             var_not_aligned_groups.append(var_current_group)
 
-        logger.warning(f"Excluding {var_abnormal_count} variant(s) of not normalized")
+        logger.warning(f"Detecting {var_abnormal_count} variant(s) of not normalized")
 
     # Grouping variants
     for variant in all_variants:
@@ -312,24 +320,24 @@ def process_variants(config) -> List[VariantGroup]:
     multi_group = []
     multi_var_bp = 0
     multi_var_bp_max = 0
-    single_sv_count = 0
+    single_lav_count = 0
     multi_var_bp_all = 0
     variant_max = None
 
     # inv_groups to single
     for i in range(len(inv_groups)):
         single_group.append(inv_groups[i])
-    single_sv_count += len(inv_groups)
+    single_lav_count += len(inv_groups)
 
     for i in range(len(var_not_aligned_groups)):
         single_group.append(var_not_aligned_groups[i])
-    single_sv_count += len(var_not_aligned_groups)
+    single_lav_count += len(var_not_aligned_groups)
     
     ### multi_group1:{'chrom': '2', 'variants': [Variant(chrom='2', start=906670, end=906670, ref='A', alt=['ATATATATATATA'], samples={'SL001_SL001':
     for i in range(len(variant_groups)):
         if len(variant_groups[i].variants) == 1:
             single_group.append(variant_groups[i])
-            single_sv_count += 1
+            single_lav_count += 1
         else:
             multi_group.append(variant_groups[i])
             for n in range(len(variant_groups[i].variants)):
@@ -342,24 +350,24 @@ def process_variants(config) -> List[VariantGroup]:
                     multi_var_bp_max = multi_var_bp
                     variant_max = variant
 
-    percentage_sv_overlapped = (1- single_sv_count/variant_count)*100 # get overlapped SV percentage (exclude SNP)
+    percentage_lav_overlapped = (1- single_lav_count/variant_count)*100 # get overlapped LAV percentage (exclude SNP)
     single_group.sort(key=lambda v: (parse_chrom(v.chrom), v.start))
     logger.info(f"Total base pairs to be processed: {var_bp_all:,}, max per variant: {var_bp_max:,}")
     logger.info(f"After grouping: {multi_var_bp_all:,} base pairs, max per variant: {multi_var_bp_max:,}")
     if variant_max:
         logger.info(f"Max variant located at: chromosome {variant_max.chrom}, position {variant_max.start:,}")
-    logger.info(f"{single_sv_count:,} SV(s) excluded due to lack of overlap")
-    logger.info(f"Percentage of overlapping SVs: {percentage_sv_overlapped:.2f}%")
+    logger.info(f"{single_lav_count:,} LAV(s) excluded due to lack of overlap")
+    logger.info(f"Percentage of overlapping LAVs: {percentage_lav_overlapped:.2f}%")
 
     if variant_max == None:
-        click.echo("Have no overlapped SV")
+        click.echo("Have no overlapped LAV")
         raise click.Abort()
 
-    return multi_group, single_sv_count, multi_var_bp_all, percentage_sv_overlapped, single_group, inv_count, variant_count, snp_groups
+    return multi_group, single_lav_count, multi_var_bp_all, percentage_lav_overlapped, single_group, inv_count, variant_count, snp_groups
 
 
 def filter_vcf(config, single_group, snp_groups):
-    nvcf_name = "nSV.vcf"
+    nvcf_name = "nLAV.vcf"
     if single_group:
         output_vcf = os.path.join(config.output_dir, nvcf_name)
         with pysam.VariantFile(config.vcf_file, "r") as vcf_in:
@@ -369,7 +377,7 @@ def filter_vcf(config, single_group, snp_groups):
             f_out.write(header_text)
             
             with pysam.VariantFile(config.vcf_file, "r") as vcf_in:
-                for i in tqdm(range(len(single_group)), desc="Generating nSV: ", unit='variants'):
+                for i in tqdm(range(len(single_group)), desc="Generating nLAV: ", unit='variants'):
                     variant = single_group[i].variants[0]
                     chrom, pos, ref, alt = variant.chrom, variant.start, variant.ref, variant.alt[0]
                     
@@ -379,7 +387,7 @@ def filter_vcf(config, single_group, snp_groups):
                             f_out.write(vcf_line + '\n')
                             break
 
-        logger.info(f"Non-overlapping SVs(nSVs) saved at {output_vcf}")
+        logger.info(f"Non-overlapping LAVs(nLAVs) saved at {output_vcf}")
     if snp_groups:
         snpvcf_name = "SNP.vcf"
         output_vcf = os.path.join(config.output_dir, snpvcf_name)
@@ -404,8 +412,8 @@ def filter_vcf(config, single_group, snp_groups):
     return nvcf_name
 
 
-def make_oSV(config, multi_group):
-    ovcf_name = "oSV.vcf"
+def make_oLAV(config, multi_group):
+    ovcf_name = "oLAV.vcf"
     if multi_group:
         output_vcf = os.path.join(config.output_dir, ovcf_name)
         with pysam.VariantFile(config.vcf_file, "r") as vcf_in:
@@ -415,7 +423,7 @@ def make_oSV(config, multi_group):
             f_out.write(header_text)
             
             with pysam.VariantFile(config.vcf_file, "r") as vcf_in:
-                for i in tqdm(range(len(multi_group)), desc="Generating oSV: ", unit='groups'):
+                for i in tqdm(range(len(multi_group)), desc="Generating oLAV: ", unit='groups'):
                     variant_group = multi_group[i].variants
                     for variant in variant_group:
                         chrom, pos, ref, alt = variant.chrom, variant.start, variant.ref, variant.alt[0]
@@ -437,4 +445,4 @@ def make_oSV(config, multi_group):
                                     vcf_line = str(rec).strip()
                                     f_out.write(vcf_line + '\n')  
                                     break
-        logger.info(f"Overlapping SVs(oSVs) saved at {output_vcf}")    
+        logger.info(f"Overlapping LAVs(oLAVs) saved at {output_vcf}")    

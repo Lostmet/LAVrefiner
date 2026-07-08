@@ -14,12 +14,12 @@ class PlinkFiles(NamedTuple):
     bim: str
     fam: str
 
-def nrSV_vcf_generate(nrSV_csv: str, config, nrSV_list, nSV_name: str):
+def nrLAV_vcf_generate(nrLAV_csv: str, config, nrLAV_list, nSV_name: str):
     '''
-    Generate a new VCF-style table from nrSV metadata and original VCF genotype info.
+    Generate a new VCF-style table from nrLAV metadata and original VCF genotype info.
     '''
-    df = pd.read_csv(nrSV_csv) 
-    nrSV_count = df.shape[0]
+    df = pd.read_csv(nrLAV_csv) 
+    nrLAV_count = df.shape[0]
     output_cache = {}  # Dictionary to store SV genotype results
 
     # Get the output VCF file name
@@ -27,7 +27,7 @@ def nrSV_vcf_generate(nrSV_csv: str, config, nrSV_list, nSV_name: str):
 
     # Read the original VCF file
     with pysam.VariantFile(config.vcf_file, "r") as vcf_in:
-        for item in nrSV_list:
+        for item in nrLAV_list:
             parts = item['group'].split('_')
             chrom = parts[1]
             pos = int(parts[3])
@@ -67,7 +67,7 @@ def nrSV_vcf_generate(nrSV_csv: str, config, nrSV_list, nSV_name: str):
         for _, row in df.iterrows():
             group_name_parts = row['chromosome_group'].split('_')
             group_name = '_'.join(group_name_parts[:-1])
-            nrSV_id = row['chromosome_group']
+            nrLAV_id = row['chromosome_group']
             chrom = group_name_parts[1]
             meta = ast.literal_eval(row['meta_array'])
             sv_id = int(row['sequence_id'][3:])
@@ -77,9 +77,9 @@ def nrSV_vcf_generate(nrSV_csv: str, config, nrSV_list, nSV_name: str):
             try:
                 gt_info = output_cache[group_name][f'SV{sv_id}']
             except KeyError as e:
-                logger.warning(f"KeyError: {e} not found in {group_name} when processing nrSV")
+                logger.warning(f"KeyError: {e} not found in {group_name} when processing nrLAV")
                 gt_info = {}
             gt_values = ["/".join(map(str, gt_info.get(sample, ('.', '.')))) for sample in sample_names]
-            f_out.write(f"{chrom}\t{pos}\t{nrSV_id}\t{ref}\t{alt}\t.\t.\ttype=nrSV\tGT\t" + "\t".join(gt_values) + "\n")
+            f_out.write(f"{chrom}\t{pos}\t{nrLAV_id}\t{ref}\t{alt}\t.\t.\ttype=nrLAV\tGT\t" + "\t".join(gt_values) + "\n")
 
-    return nrSV_count
+    return nrLAV_count
